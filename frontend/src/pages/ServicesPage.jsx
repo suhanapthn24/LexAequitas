@@ -18,7 +18,7 @@ const ServicesPage = () => {
       title: "AI Trial Simulation",
       description: "Practice courtroom arguments in realistic AI-powered trial scenarios. Face off against intelligent defense attorneys and receive judicial feedback.",
       features: [
-        "Audio-based courtroom dialogue",
+//         "Audio-based courtroom dialogue",
         "AI Defense Attorney & Judge",
         "Multiple case types (civil, criminal, corporate)",
         "Real-time objections and rulings",
@@ -73,21 +73,21 @@ const ServicesPage = () => {
       link: "/documents",
       highlight: false
     },
-    {
-      icon: Shield,
-      title: "Compliance & Risk Alerts",
-      description: "Stay compliant with real-time procedural risk alerts, compliance monitoring, and proactive risk management.",
-      features: [
-        "Procedural compliance checks",
-        "Risk severity ratings",
-        "Regulatory monitoring",
-        "Compliance dashboards",
-        "Alert prioritization",
-        "Resolution tracking"
-      ],
-      link: "/alerts",
-      highlight: false
-    },
+    // {
+    //   icon: Shield,
+    //   title: "Compliance & Risk Alerts",
+    //   description: "Stay compliant with real-time procedural risk alerts, compliance monitoring, and proactive risk management.",
+    //   features: [
+    //     "Procedural compliance checks",
+    //     "Risk severity ratings",
+    //     "Regulatory monitoring",
+    //     "Compliance dashboards",
+    //     "Alert prioritization",
+    //     "Resolution tracking"
+    //   ],
+    //   link: "/alerts",
+    //   highlight: false
+    // },
     {
       icon: Lightbulb,
       title: "Legal Strategy Suggestions",

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -14,23 +14,21 @@ const AuthPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("login");
 
-  // Login form
   const [loginData, setLoginData] = useState({ email: "", password: "" });
 
-  // Register form
   const [registerData, setRegisterData] = useState({
     email: "",
     password: "",
     confirmPassword: "",
     fullName: "",
     firmName: ""
-  });
+  });  
 
-  // Redirect if already logged in
-  if (user) {
-    navigate("/cases");
-    return null;
-  }
+  useEffect(() => {
+    if (user) {
+      navigate("/cases");
+    }
+  }, [user, navigate]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -41,11 +39,14 @@ const AuthPage = () => {
 
     setIsLoading(true);
     try {
-      await login(loginData.email, loginData.password);
+      await login({
+        email: loginData.email,
+        password: loginData.password
+      });
       toast.success("Welcome back!");
       navigate("/cases");
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Invalid credentials");
+      toast.error(error.message || "Something went wrong");
     } finally {
       setIsLoading(false);
     }
@@ -68,16 +69,15 @@ const AuthPage = () => {
 
     setIsLoading(true);
     try {
-      await register(
-        registerData.email,
-        registerData.password,
-        registerData.fullName,
-        registerData.firmName
-      );
+      await register({
+        email: registerData.email,
+        password: registerData.password,
+        name: registerData.fullName
+      });
       toast.success("Account created successfully!");
       navigate("/cases");
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Registration failed");
+      toast.error(error.message || "Something went wrong");
     } finally {
       setIsLoading(false);
     }

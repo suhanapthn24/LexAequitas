@@ -1,537 +1,622 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import axios from "axios";
-import { format } from "date-fns";
-import {
-  Scale,
-  Plus,
-  MoreVertical,
-  Pencil,
-  Trash2,
-  Briefcase,
-  Calendar as CalendarIcon,
-  Building,
-  User,
-  FileText,
-  Loader2,
-  Search,
-  Gavel,
-  AlertTriangle,
-  CheckCircle2,
-  Clock
-} from "lucide-react";
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = "https://mpj-backend-java.onrender.com/api";
 
+// ── Constants ──────────────────────────────────────────────────────────────
+const CASE_TYPES = ["civil", "criminal", "family", "corporate", "property", "labour", "tax", "constitutional"];
+
+const STATUSES = [
+  { value: "active",     label: "Active",     color: "#22c55e" },
+  { value: "pending",    label: "Pending",    color: "#f59e0b" },
+  { value: "adjourned",  label: "Adjourned",  color: "#6366f1" },
+  { value: "appealed",   label: "Appealed",   color: "#ec4899" },
+  { value: "closed",     label: "Closed",     color: "#6b7280" },
+  { value: "won",        label: "Won",        color: "#10b981" },
+  { value: "lost",       label: "Lost",       color: "#ef4444" },
+];
+
+const STATUS_PIPELINE = ["active", "pending", "adjourned", "appealed", "closed"];
+
+const EMPTY_FORM = {
+  title: "",
+  caseNumber: "",
+  caseType: "civil",
+  clientName: "",
+  opposingParty: "",
+  courtName: "",
+  judgeName: "",
+  nextHearingDate: "",
+  description: "",
+  status: "active",
+};
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+const statusMeta = (val) => STATUSES.find((s) => s.value === val) || STATUSES[0];
+
+const formatDate = (d) => {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+};
+
+const daysUntil = (d) => {
+  if (!d) return null;
+  const diff = Math.ceil((new Date(d) - new Date()) / 86400000);
+  return diff;
+};
+
+// ── Sub-components ─────────────────────────────────────────────────────────
+const Badge = ({ status }) => {
+  const meta = statusMeta(status);
+  return (
+    <span
+      style={{
+        backgroundColor: meta.color + "22",
+        color: meta.color,
+        border: `1px solid ${meta.color}55`,
+        borderRadius: "6px",
+        padding: "2px 10px",
+        fontSize: "11px",
+        fontWeight: 700,
+        letterSpacing: "0.08em",
+        textTransform: "uppercase",
+        display: "inline-block",
+      }}
+    >
+      {meta.label}
+    </span>
+  );
+};
+
+const HearingBadge = ({ date }) => {
+  const days = daysUntil(date);
+  if (days === null) return null;
+  const urgent = days <= 3;
+  const past = days < 0;
+  return (
+    <span
+      style={{
+        backgroundColor: past ? "#ef444422" : urgent ? "#f59e0b22" : "#6366f122",
+        color: past ? "#ef4444" : urgent ? "#f59e0b" : "#a5b4fc",
+        border: `1px solid ${past ? "#ef4444" : urgent ? "#f59e0b" : "#6366f1"}55`,
+        borderRadius: "6px",
+        padding: "2px 10px",
+        fontSize: "11px",
+        fontWeight: 600,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
+      }}
+    >
+      {past ? "⚠ Overdue" : urgent ? `⚡ In ${days}d` : `📅 In ${days}d`}
+    </span>
+  );
+};
+
+const StatCard = ({ label, value, accent }) => (
+  <div
+    style={{
+      background: "#0f172a",
+      border: "1px solid #1e293b",
+      borderRadius: "12px",
+      padding: "18px 24px",
+      borderLeft: `3px solid ${accent}`,
+    }}
+  >
+    <p style={{ color: "#64748b", fontSize: "12px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "6px" }}>{label}</p>
+    <p style={{ color: "#f1f5f9", fontSize: "28px", fontWeight: 800, fontFamily: "Georgia, serif" }}>{value}</p>
+  </div>
+);
+
+const ProgressPipeline = ({ status }) => {
+  const idx = STATUS_PIPELINE.indexOf(status);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "0", margin: "8px 0 2px" }}>
+      {STATUS_PIPELINE.map((s, i) => {
+        const meta = statusMeta(s);
+        const active = i === idx;
+        const done = i < idx;
+        return (
+          <div key={s} style={{ display: "flex", alignItems: "center", flex: 1 }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1 }}>
+              <div
+                style={{
+                  width: "10px",
+                  height: "10px",
+                  borderRadius: "50%",
+                  backgroundColor: active ? meta.color : done ? "#334155" : "#1e293b",
+                  border: `2px solid ${active ? meta.color : done ? "#475569" : "#1e293b"}`,
+                  boxShadow: active ? `0 0 8px ${meta.color}` : "none",
+                  transition: "all 0.3s",
+                  flexShrink: 0,
+                }}
+              />
+              <span style={{ color: active ? meta.color : "#475569", fontSize: "9px", marginTop: "3px", whiteSpace: "nowrap", fontWeight: active ? 700 : 400 }}>
+                {meta.label}
+              </span>
+            </div>
+            {i < STATUS_PIPELINE.length - 1 && (
+              <div style={{ height: "2px", flex: 1, backgroundColor: done ? "#334155" : "#1e293b", marginBottom: "14px" }} />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// ── Main Page ──────────────────────────────────────────────────────────────
 const CaseManagementPage = () => {
-  const { getAuthHeader } = useAuth();
+  const { user } = useAuth();
+
   const [cases, setCases] = useState([]);
-  const [stats, setStats] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingCase, setEditingCase] = useState(null);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [formData, setFormData] = useState(EMPTY_FORM);
+  const [editingId, setEditingId] = useState(null);
+  const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterType, setFilterType] = useState("all");
+  const [showForm, setShowForm] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
 
-  // Form state
-  const [formData, setFormData] = useState({
-    title: "",
-    case_number: "",
-    case_type: "civil",
-    client_name: "",
-    opposing_party: "",
-    court_name: "",
-    judge_name: "",
-    next_hearing_date: null,
-    description: "",
-    status: "active"
-  });
+  // ── API helpers ──────────────────────────────────────────────────────────
+  const getHeaders = () => ({ "Content-Type": "application/json" });
 
-  useEffect(() => {
-    fetchCases();
-    fetchStats();
-  }, []);
-
-  const fetchCases = async () => {
+  const fetchCases = useCallback(async () => {
     try {
-      const response = await axios.get(`${API}/cases`, getAuthHeader());
-      setCases(response.data);
-    } catch (error) {
+      const res = await fetch(`${API}/cases`, { headers: getHeaders() });
+      const data = await res.json();
+      setCases(data);
+    } catch {
       toast.error("Failed to fetch cases");
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  const fetchStats = async () => {
-    try {
-      const response = await axios.get(`${API}/dashboard/stats`, getAuthHeader());
-      setStats(response.data);
-    } catch (error) {
-      console.error("Failed to fetch stats");
-    }
-  };
+  useEffect(() => { fetchCases(); }, [fetchCases]);
 
-  const resetForm = () => {
-    setFormData({
-      title: "",
-      case_number: "",
-      case_type: "civil",
-      client_name: "",
-      opposing_party: "",
-      court_name: "",
-      judge_name: "",
-      next_hearing_date: null,
-      description: "",
-      status: "active"
-    });
-    setEditingCase(null);
-  };
-
+  // ── CRUD ─────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    if (!formData.title || !formData.case_number || !formData.client_name) {
-      toast.error("Please fill in required fields");
+    if (!formData.title || !formData.caseNumber || !formData.clientName) {
+      toast.error("Title, Case Number and Client Name are required");
       return;
     }
 
+    const payload = {
+      ...formData,
+      nextHearingDate: formData.nextHearingDate || null,
+    };
+
     try {
-      const payload = {
-        ...formData,
-        next_hearing_date: formData.next_hearing_date 
-          ? format(formData.next_hearing_date, "yyyy-MM-dd") 
-          : null
-      };
+      const url = editingId ? `${API}/cases/${editingId}` : `${API}/cases`;
+      const method = editingId ? "PUT" : "POST";
+      const res = await fetch(url, { method, headers: getHeaders(), body: JSON.stringify(payload) });
 
-      if (editingCase) {
-        await axios.put(`${API}/cases/${editingCase.id}`, payload, getAuthHeader());
-        toast.success("Case updated successfully");
-      } else {
-        await axios.post(`${API}/cases`, payload, getAuthHeader());
-        toast.success("Case created successfully");
-      }
+      if (!res.ok) { toast.error(editingId ? "Update failed" : "Create failed"); return; }
 
-      setDialogOpen(false);
-      resetForm();
+      toast.success(editingId ? "Case updated" : "Case created");
+      setFormData(EMPTY_FORM);
+      setEditingId(null);
+      setShowForm(false);
       fetchCases();
-      fetchStats();
-    } catch (error) {
-      toast.error("Failed to save case");
+    } catch {
+      toast.error("Request failed");
     }
   };
 
-  const handleEdit = (caseItem) => {
-    setEditingCase(caseItem);
+  const handleEdit = (c) => {
     setFormData({
-      title: caseItem.title,
-      case_number: caseItem.case_number,
-      case_type: caseItem.case_type,
-      client_name: caseItem.client_name,
-      opposing_party: caseItem.opposing_party,
-      court_name: caseItem.court_name,
-      judge_name: caseItem.judge_name || "",
-      next_hearing_date: caseItem.next_hearing_date ? new Date(caseItem.next_hearing_date) : null,
-      description: caseItem.description || "",
-      status: caseItem.status
+      title: c.title || "",
+      caseNumber: c.caseNumber || "",
+      caseType: c.caseType || "civil",
+      clientName: c.clientName || "",
+      opposingParty: c.opposingParty || "",
+      courtName: c.courtName || "",
+      judgeName: c.judgeName || "",
+      nextHearingDate: c.nextHearingDate || "",
+      description: c.description || "",
+      status: c.status || "active",
     });
-    setDialogOpen(true);
+    setEditingId(c.id);
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const handleDelete = async (caseId) => {
-    if (!window.confirm("Are you sure you want to delete this case?")) return;
-
+  const handleDelete = async (id) => {
+    if (!window.confirm("Delete this case?")) return;
     try {
-      await axios.delete(`${API}/cases/${caseId}`, getAuthHeader());
-      toast.success("Case deleted successfully");
+      await fetch(`${API}/cases/${id}`, { method: "DELETE", headers: getHeaders() });
+      toast.success("Case deleted");
       fetchCases();
-      fetchStats();
-    } catch (error) {
-      toast.error("Failed to delete case");
+    } catch {
+      toast.error("Delete failed");
     }
   };
 
-  const getStatusBadge = (status) => {
-    switch (status) {
-      case "active":
-        return <Badge className="bg-[#10B981]/20 text-[#10B981] border-[#10B981]/30">Active</Badge>;
-      case "pending":
-        return <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">Pending</Badge>;
-      case "closed":
-        return <Badge className="bg-slate-500/20 text-slate-400 border-slate-500/30">Closed</Badge>;
-      default:
-        return <Badge>{status}</Badge>;
+  const handleStatusChange = async (c, newStatus) => {
+    try {
+      const res = await fetch(`${API}/cases/${c.id}`, {
+        method: "PUT",
+        headers: getHeaders(),
+        body: JSON.stringify({ ...c, status: newStatus }),
+      });
+      if (!res.ok) { toast.error("Status update failed"); return; }
+      toast.success("Status updated");
+      fetchCases();
+    } catch {
+      toast.error("Status update failed");
     }
   };
 
-  const getCaseTypeIcon = (type) => {
-    switch (type) {
-      case "civil":
-        return <Scale className="w-4 h-4 text-blue-400" />;
-      case "criminal":
-        return <AlertTriangle className="w-4 h-4 text-red-400" />;
-      case "corporate":
-        return <Building className="w-4 h-4 text-purple-400" />;
-      case "family":
-        return <User className="w-4 h-4 text-green-400" />;
-      default:
-        return <Briefcase className="w-4 h-4 text-slate-400" />;
-    }
-  };
-
-  const filteredCases = cases.filter(c => {
-    const matchesSearch = c.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         c.case_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         c.client_name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = filterStatus === "all" || c.status === filterStatus;
-    return matchesSearch && matchesStatus;
+  // ── Filtering ─────────────────────────────────────────────────────────────
+  const filtered = cases.filter((c) => {
+    const q = search.toLowerCase();
+    const matchSearch =
+      !q ||
+      c.title?.toLowerCase().includes(q) ||
+      c.caseNumber?.toLowerCase().includes(q) ||
+      c.clientName?.toLowerCase().includes(q) ||
+      c.courtName?.toLowerCase().includes(q) ||
+      c.judgeName?.toLowerCase().includes(q);
+    const matchStatus = filterStatus === "all" || c.status === filterStatus;
+    const matchType = filterType === "all" || c.caseType === filterType;
+    return matchSearch && matchStatus && matchType;
   });
 
+  // ── Stats ─────────────────────────────────────────────────────────────────
+  const stats = {
+    total: cases.length,
+    active: cases.filter((c) => c.status === "active").length,
+    upcoming: cases.filter((c) => { const d = daysUntil(c.nextHearingDate); return d !== null && d >= 0 && d <= 7; }).length,
+    closed: cases.filter((c) => ["closed", "won", "lost"].includes(c.status)).length,
+  };
+
+  // ── Styles ─────────────────────────────────────────────────────────────────
+  const inputStyle = {
+    background: "#0f172a",
+    border: "1px solid #1e293b",
+    borderRadius: "8px",
+    color: "#f1f5f9",
+    padding: "10px 14px",
+    fontSize: "14px",
+    width: "100%",
+    outline: "none",
+    boxSizing: "border-box",
+  };
+
+  const labelStyle = {
+    color: "#94a3b8",
+    fontSize: "11px",
+    fontWeight: 600,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    marginBottom: "5px",
+    display: "block",
+  };
+
+  const field = (label, key, type = "text", options = null) => (
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      <label style={labelStyle}>{label}</label>
+      {options ? (
+        <select
+          value={formData[key]}
+          onChange={(e) => setFormData({ ...formData, [key]: e.target.value })}
+          style={inputStyle}
+        >
+          {options.map((o) => (
+            <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>
+          ))}
+        </select>
+      ) : (
+        <input
+          type={type}
+          value={formData[key]}
+          onChange={(e) => setFormData({ ...formData, [key]: e.target.value })}
+          style={inputStyle}
+          placeholder={label}
+        />
+      )}
+    </div>
+  );
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-[#0F172A] py-20">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
-          <div>
-            <h1 className="font-serif text-3xl font-bold text-white mb-2">Case Management</h1>
-            <p className="text-slate-400">Manage and track your litigation cases</p>
-          </div>
-          <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
-            <DialogTrigger asChild>
-              <Button 
-                className="mt-4 md:mt-0 bg-[#D4AF37] text-[#0F172A] hover:bg-[#c9a430] rounded-none uppercase tracking-wide text-xs font-bold"
-                data-testid="new-case-btn"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                New Case
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="bg-[#0F172A] border-slate-800 max-w-2xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle className="font-serif text-xl text-white">
-                  {editingCase ? "Edit Case" : "Create New Case"}
-                </DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 mt-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-2">Case Title *</label>
-                    <Input
-                      value={formData.title}
-                      onChange={(e) => setFormData({...formData, title: e.target.value})}
-                      placeholder="Smith v. Johnson"
-                      className="bg-transparent border-slate-700 text-white"
-                      data-testid="case-form-title"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-2">Case Number *</label>
-                    <Input
-                      value={formData.case_number}
-                      onChange={(e) => setFormData({...formData, case_number: e.target.value})}
-                      placeholder="2024-CV-12345"
-                      className="bg-transparent border-slate-700 text-white"
-                      data-testid="case-form-number"
-                    />
-                  </div>
-                </div>
+    <div style={{ minHeight: "100vh", background: "#020817", color: "#f1f5f9", fontFamily: "'DM Sans', sans-serif", padding: "0" }}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet" />
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-2">Case Type</label>
-                    <Select value={formData.case_type} onValueChange={(v) => setFormData({...formData, case_type: v})}>
-                      <SelectTrigger className="bg-transparent border-slate-700 text-white">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-[#0F172A] border-slate-700">
-                        <SelectItem value="civil">Civil</SelectItem>
-                        <SelectItem value="criminal">Criminal</SelectItem>
-                        <SelectItem value="corporate">Corporate</SelectItem>
-                        <SelectItem value="family">Family</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-2">Status</label>
-                    <Select value={formData.status} onValueChange={(v) => setFormData({...formData, status: v})}>
-                      <SelectTrigger className="bg-transparent border-slate-700 text-white">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-[#0F172A] border-slate-700">
-                        <SelectItem value="active">Active</SelectItem>
-                        <SelectItem value="pending">Pending</SelectItem>
-                        <SelectItem value="closed">Closed</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
+      {/* Header */}
+      <div style={{ borderBottom: "1px solid #1e293b", padding: "24px 40px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#020817", position: "sticky", top: 0, zIndex: 50 }}>
+        <div>
+          <h1 style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "26px", fontWeight: 800, color: "#f8fafc", margin: 0, letterSpacing: "-0.5px" }}>
+            ⚖ LexAequitas
+          </h1>
+          <p style={{ color: "#475569", fontSize: "13px", margin: "2px 0 0" }}>Case Management System</p>
+        </div>
+        <button
+          onClick={() => { setEditingId(null); setFormData(EMPTY_FORM); setShowForm(!showForm); }}
+          style={{
+            background: showForm ? "#1e293b" : "linear-gradient(135deg, #6366f1, #8b5cf6)",
+            color: "#fff",
+            border: "none",
+            borderRadius: "8px",
+            padding: "10px 20px",
+            fontSize: "14px",
+            fontWeight: 600,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+          }}
+        >
+          {showForm ? "✕ Cancel" : "+ New Case"}
+        </button>
+      </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-2">Client Name *</label>
-                    <Input
-                      value={formData.client_name}
-                      onChange={(e) => setFormData({...formData, client_name: e.target.value})}
-                      className="bg-transparent border-slate-700 text-white"
-                      data-testid="case-form-client"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-2">Opposing Party</label>
-                    <Input
-                      value={formData.opposing_party}
-                      onChange={(e) => setFormData({...formData, opposing_party: e.target.value})}
-                      className="bg-transparent border-slate-700 text-white"
-                    />
-                  </div>
-                </div>
+      <div style={{ padding: "32px 40px", maxWidth: "1400px", margin: "0 auto" }}>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-2">Court Name</label>
-                    <Input
-                      value={formData.court_name}
-                      onChange={(e) => setFormData({...formData, court_name: e.target.value})}
-                      className="bg-transparent border-slate-700 text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-2">Judge Name</label>
-                    <Input
-                      value={formData.judge_name}
-                      onChange={(e) => setFormData({...formData, judge_name: e.target.value})}
-                      className="bg-transparent border-slate-700 text-white"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm text-slate-400 mb-2">Next Hearing Date</label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className="w-full justify-start bg-transparent border-slate-700 text-white hover:bg-slate-800"
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {formData.next_hearing_date ? format(formData.next_hearing_date, "PPP") : "Select date"}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0 bg-[#0F172A] border-slate-700">
-                      <Calendar
-                        mode="single"
-                        selected={formData.next_hearing_date}
-                        onSelect={(date) => setFormData({...formData, next_hearing_date: date})}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-
-                <div>
-                  <label className="block text-sm text-slate-400 mb-2">Description</label>
-                  <Textarea
-                    value={formData.description}
-                    onChange={(e) => setFormData({...formData, description: e.target.value})}
-                    className="bg-transparent border-slate-700 text-white resize-none"
-                    rows={3}
-                  />
-                </div>
-
-                <Button
-                  onClick={handleSubmit}
-                  className="w-full bg-[#D4AF37] text-[#0F172A] hover:bg-[#c9a430] rounded-none uppercase tracking-wide font-bold"
-                  data-testid="case-form-submit"
-                >
-                  {editingCase ? "Update Case" : "Create Case"}
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
+        {/* Stats */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px", marginBottom: "32px" }}>
+          <StatCard label="Total Cases" value={stats.total} accent="#6366f1" />
+          <StatCard label="Active" value={stats.active} accent="#22c55e" />
+          <StatCard label="Hearing ≤7 days" value={stats.upcoming} accent="#f59e0b" />
+          <StatCard label="Closed / Resolved" value={stats.closed} accent="#64748b" />
         </div>
 
-        {/* Stats Cards */}
-        {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-            <Card className="bg-[#020617] border-slate-800 p-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-blue-500/10 border border-blue-500/30 flex items-center justify-center">
-                  <Briefcase className="w-5 h-5 text-blue-400" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-white">{stats.total_cases}</p>
-                  <p className="text-xs text-slate-400 uppercase tracking-wide">Total Cases</p>
-                </div>
+        {/* Form */}
+        {showForm && (
+          <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "16px", padding: "28px", marginBottom: "32px" }}>
+            <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: "20px", fontWeight: 700, marginBottom: "24px", color: "#e2e8f0" }}>
+              {editingId ? "✏ Edit Case" : "📁 New Case"}
+            </h2>
+
+            {/* Row 1 */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+              {field("Case Title *", "title")}
+              {field("Case Number *", "caseNumber")}
+              {field("Case Type", "caseType", "text", CASE_TYPES.map((t) => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) })))}
+            </div>
+
+            {/* Row 2: Client Info */}
+            <div style={{ border: "1px solid #1e293b", borderRadius: "10px", padding: "16px", marginBottom: "16px" }}>
+              <p style={{ color: "#6366f1", fontSize: "11px", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "12px" }}>👤 Client Information</p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                {field("Client Name *", "clientName")}
+                {field("Opposing Party", "opposingParty")}
               </div>
-            </Card>
-            <Card className="bg-[#020617] border-slate-800 p-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-[#10B981]/10 border border-[#10B981]/30 flex items-center justify-center">
-                  <CheckCircle2 className="w-5 h-5 text-[#10B981]" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-white">{stats.active_cases}</p>
-                  <p className="text-xs text-slate-400 uppercase tracking-wide">Active</p>
-                </div>
+            </div>
+
+            {/* Row 3: Court & Judge */}
+            <div style={{ border: "1px solid #1e293b", borderRadius: "10px", padding: "16px", marginBottom: "16px" }}>
+              <p style={{ color: "#10b981", fontSize: "11px", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "12px" }}>🏛 Court & Judge Details</p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                {field("Court Name", "courtName")}
+                {field("Judge Name", "judgeName")}
               </div>
-            </Card>
-            <Card className="bg-[#020617] border-slate-800 p-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center">
-                  <Gavel className="w-5 h-5 text-[#D4AF37]" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-white">{stats.total_simulations}</p>
-                  <p className="text-xs text-slate-400 uppercase tracking-wide">Simulations</p>
-                </div>
+            </div>
+
+            {/* Row 4: Scheduling & Status */}
+            <div style={{ border: "1px solid #1e293b", borderRadius: "10px", padding: "16px", marginBottom: "16px" }}>
+              <p style={{ color: "#f59e0b", fontSize: "11px", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "12px" }}>📅 Scheduling & Status</p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                {field("Next Hearing Date", "nextHearingDate", "date")}
+                {field("Status", "status", "text", STATUSES.map((s) => ({ value: s.value, label: s.label })))}
               </div>
-            </Card>
-            <Card className="bg-[#020617] border-slate-800 p-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-red-500/10 border border-red-500/30 flex items-center justify-center">
-                  <AlertTriangle className="w-5 h-5 text-red-400" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-white">{stats.active_alerts}</p>
-                  <p className="text-xs text-slate-400 uppercase tracking-wide">Alerts</p>
-                </div>
-              </div>
-            </Card>
+            </div>
+
+            {/* Description */}
+            <div style={{ display: "flex", flexDirection: "column", marginBottom: "20px" }}>
+              <label style={labelStyle}>Description / Notes</label>
+              <textarea
+                rows={4}
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="Case notes, background, relevant details..."
+                style={{ ...inputStyle, resize: "vertical", lineHeight: "1.6" }}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: "12px" }}>
+              <button
+                onClick={handleSubmit}
+                style={{
+                  background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "8px",
+                  padding: "12px 28px",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  flex: 1,
+                }}
+              >
+                {editingId ? "Update Case" : "Create Case"}
+              </button>
+              {editingId && (
+                <button
+                  onClick={() => { setEditingId(null); setFormData(EMPTY_FORM); setShowForm(false); }}
+                  style={{ background: "#1e293b", color: "#94a3b8", border: "none", borderRadius: "8px", padding: "12px 20px", cursor: "pointer" }}
+                >
+                  Cancel Edit
+                </button>
+              )}
+            </div>
           </div>
         )}
 
         {/* Filters */}
-        <div className="flex flex-col md:flex-row gap-4 mb-6">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <Input
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search cases..."
-              className="pl-10 bg-transparent border-slate-700 text-white placeholder:text-slate-500"
-              data-testid="case-search-input"
-            />
-          </div>
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-40 bg-transparent border-slate-700 text-white">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-[#0F172A] border-slate-700">
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="closed">Closed</SelectItem>
-            </SelectContent>
-          </Select>
+        <div style={{ display: "flex", gap: "12px", marginBottom: "24px", flexWrap: "wrap", alignItems: "center" }}>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="🔍  Search by title, number, client, judge..."
+            style={{ ...inputStyle, flex: 2, minWidth: "220px" }}
+          />
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            style={{ ...inputStyle, flex: 1, minWidth: "130px" }}
+          >
+            <option value="all">All Statuses</option>
+            {STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+            style={{ ...inputStyle, flex: 1, minWidth: "130px" }}
+          >
+            <option value="all">All Types</option>
+            {CASE_TYPES.map((t) => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+          </select>
+          <span style={{ color: "#475569", fontSize: "13px", whiteSpace: "nowrap" }}>
+            {filtered.length} of {cases.length} cases
+          </span>
         </div>
 
-        {/* Cases List */}
+        {/* Case List */}
         {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-8 h-8 text-[#D4AF37] animate-spin" />
-          </div>
-        ) : filteredCases.length === 0 ? (
-          <Card className="bg-[#020617] border-slate-800 p-12 text-center">
-            <Briefcase className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-            <h3 className="text-lg text-white mb-2">No cases found</h3>
-            <p className="text-slate-400 mb-4">Create your first case to get started</p>
-          </Card>
+          <p style={{ color: "#475569", textAlign: "center", padding: "60px 0" }}>Loading cases…</p>
+        ) : filtered.length === 0 ? (
+          <p style={{ color: "#475569", textAlign: "center", padding: "60px 0" }}>No cases found</p>
         ) : (
-          <div className="space-y-4">
-            {filteredCases.map((caseItem) => (
-              <Card 
-                key={caseItem.id} 
-                className="bg-[#020617] border-slate-800 hover:border-[#D4AF37]/20 transition-colors"
-                data-testid={`case-card-${caseItem.id}`}
-              >
-                <div className="p-6">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-4">
-                      <div className="w-12 h-12 bg-slate-800 flex items-center justify-center">
-                        {getCaseTypeIcon(caseItem.case_type)}
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            {filtered.map((c) => {
+              const expanded = expandedId === c.id;
+              const days = daysUntil(c.nextHearingDate);
+              return (
+                <div
+                  key={c.id}
+                  style={{
+                    background: "#0f172a",
+                    border: `1px solid ${expanded ? "#334155" : "#1e293b"}`,
+                    borderRadius: "12px",
+                    overflow: "hidden",
+                    transition: "border-color 0.2s",
+                  }}
+                >
+                  {/* Card Header */}
+                  <div
+                    onClick={() => setExpandedId(expanded ? null : c.id)}
+                    style={{ padding: "16px 20px", cursor: "pointer", display: "flex", alignItems: "center", gap: "16px" }}
+                  >
+                    {/* Case type tag */}
+                    <div style={{ background: "#1e293b", borderRadius: "6px", padding: "4px 10px", fontSize: "11px", color: "#94a3b8", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", whiteSpace: "nowrap" }}>
+                      {c.caseType || "—"}
+                    </div>
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "4px", flexWrap: "wrap" }}>
+                        <h3 style={{ fontWeight: 700, fontSize: "15px", color: "#f1f5f9", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.title}</h3>
+                        <Badge status={c.status} />
+                        {c.nextHearingDate && <HearingBadge date={c.nextHearingDate} />}
                       </div>
-                      <div>
-                        <div className="flex items-center gap-3 mb-1">
-                          <h3 className="font-serif text-lg text-white">{caseItem.title}</h3>
-                          {getStatusBadge(caseItem.status)}
+                      <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+                        <span style={{ color: "#6366f1", fontSize: "12px", fontWeight: 600 }}>#{c.caseNumber}</span>
+                        <span style={{ color: "#64748b", fontSize: "12px" }}>👤 {c.clientName}</span>
+                        {c.courtName && <span style={{ color: "#64748b", fontSize: "12px" }}>🏛 {c.courtName}</span>}
+                        {c.nextHearingDate && <span style={{ color: "#64748b", fontSize: "12px" }}>📅 {formatDate(c.nextHearingDate)}</span>}
+                      </div>
+                    </div>
+
+                    <span style={{ color: "#475569", fontSize: "18px", userSelect: "none", flexShrink: 0 }}>
+                      {expanded ? "▲" : "▼"}
+                    </span>
+                  </div>
+
+                  {/* Expanded Detail */}
+                  {expanded && (
+                    <div style={{ borderTop: "1px solid #1e293b", padding: "20px" }}>
+                      {/* Progress pipeline */}
+                      <div style={{ marginBottom: "20px" }}>
+                        <p style={{ ...labelStyle, marginBottom: "8px" }}>Case Progress</p>
+                        <ProgressPipeline status={c.status} />
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "20px", marginBottom: "16px" }}>
+                        {/* Client Info */}
+                        <div style={{ background: "#020817", borderRadius: "8px", padding: "14px" }}>
+                          <p style={{ ...labelStyle, color: "#6366f1" }}>Client Information</p>
+                          <p style={{ color: "#e2e8f0", fontSize: "14px", fontWeight: 600, marginBottom: "4px" }}>{c.clientName || "—"}</p>
+                          <p style={{ color: "#64748b", fontSize: "13px" }}>vs. {c.opposingParty || "—"}</p>
                         </div>
-                        <p className="text-sm text-slate-400 font-mono">{caseItem.case_number}</p>
-                        <div className="flex flex-wrap gap-4 mt-3 text-sm text-slate-400">
-                          <span className="flex items-center gap-1">
-                            <User className="w-4 h-4" />
-                            {caseItem.client_name}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Building className="w-4 h-4" />
-                            {caseItem.court_name}
-                          </span>
-                          {caseItem.next_hearing_date && (
-                            <span className="flex items-center gap-1">
-                              <Clock className="w-4 h-4" />
-                              {format(new Date(caseItem.next_hearing_date), "MMM d, yyyy")}
-                            </span>
+
+                        {/* Court & Judge */}
+                        <div style={{ background: "#020817", borderRadius: "8px", padding: "14px" }}>
+                          <p style={{ ...labelStyle, color: "#10b981" }}>Court & Judge</p>
+                          <p style={{ color: "#e2e8f0", fontSize: "14px", fontWeight: 600, marginBottom: "4px" }}>{c.courtName || "—"}</p>
+                          <p style={{ color: "#64748b", fontSize: "13px" }}>Hon. {c.judgeName || "—"}</p>
+                        </div>
+
+                        {/* Hearing */}
+                        <div style={{ background: "#020817", borderRadius: "8px", padding: "14px" }}>
+                          <p style={{ ...labelStyle, color: "#f59e0b" }}>Next Hearing</p>
+                          <p style={{ color: "#e2e8f0", fontSize: "14px", fontWeight: 600, marginBottom: "4px" }}>{formatDate(c.nextHearingDate)}</p>
+                          {days !== null && (
+                            <p style={{ color: days < 0 ? "#ef4444" : days <= 3 ? "#f59e0b" : "#64748b", fontSize: "13px" }}>
+                              {days < 0 ? `${Math.abs(days)} days ago` : days === 0 ? "Today" : `In ${days} days`}
+                            </p>
                           )}
                         </div>
                       </div>
+
+                      {c.description && (
+                        <div style={{ background: "#020817", borderRadius: "8px", padding: "14px", marginBottom: "16px" }}>
+                          <p style={labelStyle}>Notes / Description</p>
+                          <p style={{ color: "#94a3b8", fontSize: "14px", lineHeight: "1.7", whiteSpace: "pre-wrap" }}>{c.description}</p>
+                        </div>
+                      )}
+
+                      {/* Quick Status Change */}
+                      <div style={{ marginBottom: "16px" }}>
+                        <p style={labelStyle}>Quick Status Update</p>
+                        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                          {STATUSES.map((s) => (
+                            <button
+                              key={s.value}
+                              onClick={() => handleStatusChange(c, s.value)}
+                              style={{
+                                background: c.status === s.value ? s.color + "33" : "#1e293b",
+                                color: c.status === s.value ? s.color : "#64748b",
+                                border: `1px solid ${c.status === s.value ? s.color : "#1e293b"}`,
+                                borderRadius: "6px",
+                                padding: "5px 14px",
+                                fontSize: "12px",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                              }}
+                            >
+                              {s.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div style={{ display: "flex", gap: "10px" }}>
+                        <button
+                          onClick={() => handleEdit(c)}
+                          style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: "8px", padding: "8px 20px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}
+                        >
+                          ✏ Edit
+                        </button>
+                        <button
+                          onClick={() => handleDelete(c.id)}
+                          style={{ background: "#ef444422", color: "#ef4444", border: "1px solid #ef444455", borderRadius: "8px", padding: "8px 20px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}
+                        >
+                          🗑 Delete
+                        </button>
+                      </div>
                     </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="text-slate-400 hover:text-white">
-                          <MoreVertical className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="bg-[#0F172A] border-slate-700">
-                        <DropdownMenuItem 
-                          onClick={() => handleEdit(caseItem)}
-                          className="text-slate-300 cursor-pointer"
-                        >
-                          <Pencil className="w-4 h-4 mr-2" />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem 
-                          onClick={() => handleDelete(caseItem.id)}
-                          className="text-red-400 cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                  {caseItem.description && (
-                    <p className="mt-4 text-slate-400 text-sm border-t border-slate-800 pt-4">
-                      {caseItem.description}
-                    </p>
                   )}
                 </div>
-              </Card>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
