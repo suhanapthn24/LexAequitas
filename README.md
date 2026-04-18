@@ -9,6 +9,7 @@ Architecture:
 - `docs/FULL_DOCUMENTATION.md`
 - `docs/USER_MANUAL.md`
 - `docs/DEPLOYMENT_INSTRUCTIONS.md`
+- `docs/RUN_PROJECT_MANUAL.md`
 - `docs/CODE_DIRECTORY_STRUCTURE.md`
 - `docs/ACTUAL_CODE_AND_ASSETS.md`
 - `docs/SOURCE_FILE_INDEX.txt`
@@ -16,6 +17,12 @@ Architecture:
 - `docs/database/seed.sql`
 
 ## Quick Start
+For a complete setup guide starting from PostgreSQL database creation, schema setup, service configuration, and local startup order, see:
+
+```text
+docs/RUN_PROJECT_MANUAL.md
+```
+
 Run AI service:
 ```bash
 cd new_folder/ai-service
